@@ -1,0 +1,2 @@
+rootProject.name = 'db-jdbc-cp'
+include 'cp-main', 'cp-module', 'cp-static', 'cp-web'

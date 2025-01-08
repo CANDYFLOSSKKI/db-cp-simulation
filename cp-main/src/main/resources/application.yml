@@ -1,0 +1,12 @@
+server:
+  port: 13801
+
+spring:
+  dynamic:
+    tp:
+      enabled: true
+      enabledCollect: true
+      collectorTypes: micrometer
+
+logging:
+  config: "classpath:logback.xml"
