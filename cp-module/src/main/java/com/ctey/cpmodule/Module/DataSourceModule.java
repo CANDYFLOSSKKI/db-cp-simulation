@@ -8,6 +8,7 @@ import org.springframework.stereotype.Component;
 import java.sql.Connection;
 import java.sql.SQLException;
 
+// 数据源单例管理类
 @Component
 public class DataSourceModule {
     private static volatile MysqlDataSource DATASOURCE;

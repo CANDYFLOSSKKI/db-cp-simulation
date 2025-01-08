@@ -11,10 +11,6 @@ import static com.ctey.cpstatic.Static.CPCoreStatic.MAX_POOL_SIZE;
 public class MessagePrintUtil {
     private static final Logger LOGGER = Logger.getLogger("ROOT");
 
-    public static void printInfo(String msg) {
-        LOGGER.info("[USER INFO] " + msg);
-    }
-
     public static void printSaveTaskStart(String msg) {
         StringBuilder STB = new StringBuilder();
         STB.append("[SAVE TASK] ").append("TASK START:").append(msg);

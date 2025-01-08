@@ -7,6 +7,7 @@ import org.springframework.stereotype.Component;
 
 import java.util.UUID;
 
+// 客户端线程/连接的UUID单例管理类
 @Component
 public class UUIDModule {
     private static volatile TimeBasedEpochRandomGenerator GENERATOR;

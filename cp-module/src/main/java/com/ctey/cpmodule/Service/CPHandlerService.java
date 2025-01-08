@@ -324,8 +324,8 @@ public class CPHandlerService {
         Logger LOGGER = Logger.getLogger("ROOT");
         StringBuilder STB = new StringBuilder();
         List<ConnectionEntity> connectionEntityList = cpContext.connectionEntityPoolMap.values().stream().toList();
-        LOGGER.info("CURRENT_POOL_SIZE:" + CURRENT_POOL_SIZE.get());
-        LOGGER.info("CURRENT_IDLE_SIZE:" + CURRENT_IDLE_SIZE.get());
+        // LOGGER.info("CURRENT_POOL_SIZE:" + CURRENT_POOL_SIZE.get());
+        // LOGGER.info("CURRENT_IDLE_SIZE:" + CURRENT_IDLE_SIZE.get());
         for (int i = 1; i <= connectionEntityList.size(); i++) {
             ConnectionEntity connectionEntity = connectionEntityList.get(i-1);
             STB.append("CONNECTION ").append(i).append("/").append(connectionEntityList.size())
@@ -334,16 +334,15 @@ public class CPHandlerService {
             LOGGER.info(STB.toString());
             STB.setLength(0);
         }
-        List<RequestEntity> requestEntityList = cpContext.requestEntityHistoryMap.values().stream().toList();
-        for (int i = 1; i <= requestEntityList.size(); i++) {
-            RequestEntity requestEntity = requestEntityList.get(i-1);
-            STB.append("REQUEST ").append(i).append("/").append(requestEntityList.size())
-                    .append(" UUID:").append(requestEntity.getUUID())
-                    .append(" STATUS:").append(requestEntity.getStatus());
-            LOGGER.info(STB.toString());
-            STB.setLength(0);
-        }
+        // List<RequestEntity> requestEntityList = cpContext.requestEntityHistoryMap.values().stream().toList();
+        // for (int i = 1; i <= requestEntityList.size(); i++) {
+        //     RequestEntity requestEntity = requestEntityList.get(i-1);
+        //     STB.append("REQUEST ").append(i).append("/").append(requestEntityList.size())
+        //             .append(" UUID:").append(requestEntity.getUUID())
+        //             .append(" STATUS:").append(requestEntity.getStatus());
+        //     LOGGER.info(STB.toString());
+        //     STB.setLength(0);
+        // }
     }
-
 
 }

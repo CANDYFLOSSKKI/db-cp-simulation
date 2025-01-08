@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+// 客户端线程任务实体类
 @Data
 @AllArgsConstructor
 @NoArgsConstructor

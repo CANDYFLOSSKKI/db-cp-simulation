@@ -11,6 +11,7 @@ import org.springframework.context.annotation.Configuration;
 
 import java.util.concurrent.ScheduledExecutorService;
 
+// 客户端线程模拟/连接池守护线程的线程池
 @Configuration
 public class DTPConfig {
     @Bean

@@ -6,6 +6,7 @@ import lombok.NoArgsConstructor;
 
 import java.io.Serializable;
 
+// 客户端任务细节(Controller传参)
 @Data
 @AllArgsConstructor
 @NoArgsConstructor

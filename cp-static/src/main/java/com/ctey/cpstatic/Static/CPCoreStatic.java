@@ -19,6 +19,6 @@ public class CPCoreStatic {
     public static final Long MAX_CONNECT_TIME = 60000L;
     // 最大空闲时间
     public static final Long MAX_IDLE_TIME = 30000L;
-    // 最大生命周期
+    // 最大生命周期(暂未实现)
     public static final Long MAX_LIFE_TIME = 600000L;
 }

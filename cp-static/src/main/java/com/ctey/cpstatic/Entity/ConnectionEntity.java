@@ -8,6 +8,7 @@ import lombok.NoArgsConstructor;
 
 import java.sql.Connection;
 
+// 连接实体类
 @Data
 @AllArgsConstructor
 @NoArgsConstructor

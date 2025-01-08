@@ -30,6 +30,7 @@ import static com.ctey.cpstatic.Static.CPCoreStatic.*;
 import static com.ctey.cpstatic.Static.CPUserStatic.CP_INIT_SCHEDULE;
 import static com.ctey.cpstatic.Static.CPUserStatic.CP_WAIT_SIZE;
 
+// 数据库连接池动态参数和信息存储上下文
 @Component
 public class CPContext {
     private final ScheduledExecutorService cpExecutorExamineTask;
