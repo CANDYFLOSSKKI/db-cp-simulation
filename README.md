@@ -61,8 +61,8 @@ Gradle Version: 8.11.1
 
 项目运行输出示例
 
-![sample-output](.\public\sample-output.png)
+![sample-output](public\sample-output.png)
 
 项目输出测试接口示例
 
-![sample-test-interface](.\public\sample-test-interface.png)
+![sample-test-interface](public\sample-test-interface.png)
