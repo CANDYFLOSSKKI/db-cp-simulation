@@ -25,6 +25,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import static com.ctey.cpmodule.Context.CPContext.IDLE_POOL_SEMAPHORE;
 import static com.ctey.cpstatic.Static.CPCoreStatic.MAX_WAIT_TIME;
 import static com.ctey.cpstatic.Static.CPUserStatic.CP_LACK_CONNECTION_SIGN;
+import static com.ctey.cpstatic.Static.CPUserStatic.CP_REACQUIRE_FACTOR;
 
 @Component
 public class RequestWorkService {
@@ -92,7 +93,7 @@ public class RequestWorkService {
                     }
                     requestEntity.setStatus(RequestStatus.STATUS_WAITING);
                     // 记录当前已阻塞的时间,与最大等待时间相减得到本次阻塞态的剩余时间
-                    long leftWaitTime = MAX_WAIT_TIME - Duration.between(signWaitTime, Instant.now()).toMillis();
+                    long leftWaitTime = MAX_WAIT_TIME - (long)(Duration.between(signWaitTime, Instant.now()).toMillis() * CP_REACQUIRE_FACTOR);
                     if (!IDLE_POOL_SEMAPHORE.tryAcquire(leftWaitTime, TimeUnit.MILLISECONDS)) { break; }
                 }
             }

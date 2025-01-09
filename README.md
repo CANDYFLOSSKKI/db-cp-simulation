@@ -24,14 +24,6 @@ Gradle Version: 8.11.1
 
 配置连接池核心参数在com.ctey.cpstatic.Static.CPCoreStatic类
 
-### 项目使用
-
-成功配置数据源并启动项目后，项目默认运行在本地的13801端口上，输出日志默认保存在/app-cp-logs中，可使用以下两个接口进行交互
-
-**POST /api/v1/start** 启动客户端任务模拟（可多次发送模拟并发效果），数据格式示例已包含在代码中
-
-**GET /api/v1/examine** 输出连接池当前所有存活连接及其状态，可改写com.ctey.cpmodule.Service.CPHandlerService.outPutCPExamine()自定义输出结果
-
 ### 项目功能
 
 连接池默认存在一定量的空闲连接，空闲连接可被客户端线程获取变为工作状态，连接池初始化的同时设置下列三个守护线程（定时任务）
@@ -45,3 +37,32 @@ Gradle Version: 8.11.1
 连接池接收到客户端线程创建新连接的请求后，如果当前连接数小于MAX_POOL_SIZE，则创建新的空闲连接，通过信号量通知等待时间最长的客户端线程获取连接
 
 连接池接收到客户端线程归还的连接后，判断其引用次数是否到达规定的上限，并且通过SELECT 1测试查询检测连接健康度，未通过的连接将直接被关闭，检查无误的连接重新放入空闲连接中，通过信号量通知此时还在等待的客户端线程获取连接
+
+### 项目使用
+
+成功配置数据源并启动项目后，项目默认运行在本地的13801端口上，输出日志默认保存在/app-cp-logs中，可使用以下两个预设的HTTP接口进行交互
+
+**POST /api/v1/start** 启动客户端任务模拟（可多次发送模拟并发效果），数据格式示例如下：
+
+```json
+{
+   "count": 0,       // 任务列表个数(暂未使用)
+   "workList": [     // 任务列表明细
+     {
+       "id": 0,      // 任务序号(暂未使用)
+       "arrive": 0,  // 到达时间(从发送时间开始,首次尝试获取连接的时间戳时延)
+       "keep": 0     // 保持时间(从成功获取到连接开始,归还连接给连接池的时间戳时延)
+     }
+   ]
+}
+```
+
+**GET /api/v1/examine** 输出连接池当前所有存活连接及其状态，可改写com.ctey.cpmodule.Service.CPHandlerService.outPutCPExamine()自定义输出结果
+
+项目运行输出示例
+
+![sample-output](.\public\sample-output.png)
+
+项目输出测试接口示例
+
+![sample-test-interface](.\public\sample-test-interface.png)

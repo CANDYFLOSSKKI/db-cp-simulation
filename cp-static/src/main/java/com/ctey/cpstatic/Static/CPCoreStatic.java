@@ -10,7 +10,7 @@ public class CPCoreStatic {
     // 最小空闲连接数
     public static final Integer MIN_IDLE_SIZE = 4;
     // 连接超时时间
-    public static final Long MAX_WAIT_TIME = 5000L;
+    public static final Long MAX_WAIT_TIME = 30000L;
 
     // 连接最大使用次数
     public static final Integer MAX_USE_COUNT = 20;

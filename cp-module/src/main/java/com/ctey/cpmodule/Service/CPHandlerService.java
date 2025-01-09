@@ -334,15 +334,24 @@ public class CPHandlerService {
             LOGGER.info(STB.toString());
             STB.setLength(0);
         }
-        // List<RequestEntity> requestEntityList = cpContext.requestEntityHistoryMap.values().stream().toList();
-        // for (int i = 1; i <= requestEntityList.size(); i++) {
-        //     RequestEntity requestEntity = requestEntityList.get(i-1);
-        //     STB.append("REQUEST ").append(i).append("/").append(requestEntityList.size())
-        //             .append(" UUID:").append(requestEntity.getUUID())
-        //             .append(" STATUS:").append(requestEntity.getStatus());
-        //     LOGGER.info(STB.toString());
-        //     STB.setLength(0);
-        // }
+        List<ConnectionEntity> idleConnectionEntityList = cpContext.connectionIdleQueue.stream().toList();
+        for (int i = 1; i <= idleConnectionEntityList.size(); i++) {
+            ConnectionEntity connectionEntity = idleConnectionEntityList.get(i-1);
+            STB.append("IDLE CONNECTION ").append(i).append("/").append(idleConnectionEntityList.size())
+                    .append(" UUID:").append(connectionEntity.getUUID())
+                    .append(" STATUS:").append(connectionEntity.getStatus());
+            LOGGER.info(STB.toString());
+            STB.setLength(0);
+        }
+//         List<RequestEntity> requestEntityList = cpContext.requestEntityHistoryMap.values().stream().toList();
+//         for (int i = 1; i <= requestEntityList.size(); i++) {
+//             RequestEntity requestEntity = requestEntityList.get(i-1);
+//             STB.append("REQUEST ").append(i).append("/").append(requestEntityList.size())
+//                     .append(" UUID:").append(requestEntity.getUUID())
+//                     .append(" STATUS:").append(requestEntity.getStatus());
+//             LOGGER.info(STB.toString());
+//             STB.setLength(0);
+//         }
     }
 
 }

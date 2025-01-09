@@ -13,4 +13,7 @@ public class CPUserStatic {
     public static final Long CP_SAVE_TASK_DELAY2 = 2000L;
     public static final Long CP_SAVE_TASK_OFFSET2 = 50L;
     public static final Long CP_SAVE_TASK_OFFSET = 200L;
+
+    // 客户端线程获取连接失败处于等待状态时,先前获取连接时间的权重因子
+    public static final Double CP_REACQUIRE_FACTOR = 0.35;
 }
