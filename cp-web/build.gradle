@@ -24,10 +24,5 @@ dependencies {
     annotationProcessor 'org.projectlombok:lombok:1.18.36'
 }
 
-bootJar {
-    enabled = false
-}
-
-jar {
-    enabled = true
-}
+bootJar { enabled = false }
+jar { enabled = true }
