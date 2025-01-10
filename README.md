@@ -38,6 +38,8 @@ Gradle Version: 8.11.1
 
 连接池接收到客户端线程归还的连接后，判断其引用次数是否到达规定的上限，并且通过SELECT 1测试查询检测连接健康度，未通过的连接将直接被关闭，检查无误的连接重新放入空闲连接中，通过信号量通知此时还在等待的客户端线程获取连接
 
+连接池可自行进行关闭和重启操作
+
 目前已实现下列除最大生命周期外的变量参数设置与相关交互逻辑
 
 | 初始化连接数         | 连接池初始创建的连接数                                       |
@@ -70,6 +72,10 @@ Gradle Version: 8.11.1
 ```
 
 **GET /api/v1/examine** 输出连接池当前所有存活连接及其状态，可改写com.ctey.cpmodule.Service.CPHandlerService.outPutCPExamine()自定义输出结果
+
+**GET /api/v1/handle/stop** 主动关闭连接池服务
+
+**GET /api/v1/handle/restart** 主动重启连接池服务
 
 服务运行输出
 

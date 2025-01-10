@@ -2,23 +2,33 @@ package com.ctey.cpweb.Controller;
 
 import com.ctey.cpmodule.Service.CPHandlerService;
 import com.ctey.cpmodule.Service.RequestWorkService;
+import com.ctey.cpstatic.Entity.CPHandleException;
 import com.ctey.cpstatic.Entity.TaskStartReq;
+import com.feiniaojin.gracefulresponse.GracefulResponse;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.util.Optional;
+
 @RestController
 public class TaskController {
     private final RequestWorkService requestWorkService;
-    private final CPHandlerService cpHandlerService;
 
     @Autowired
-    public TaskController(RequestWorkService requestWorkService, CPHandlerService cpHandlerService) {
+    public TaskController(RequestWorkService requestWorkService) {
         this.requestWorkService = requestWorkService;
-        this.cpHandlerService = cpHandlerService;
     }
+
+    /*
+     * 接口可能返回的异常状态(CPHandleException)包括
+     * 501, CP Service has been started/连接池服务已启动
+     * 501, CP Service has been stopped/连接池服务已停止
+     * 503, CP Handler Service has been locked, please try again later/连接池管理程序正在运行中,请稍后再试
+     * 500, CP Service inner error/连接池服务内部错误
+     */
 
     /*
      * StartRequestTask()
@@ -39,7 +49,8 @@ public class TaskController {
      */
     @PostMapping("/api/v1/start")
     public void StartRequestTask(@RequestBody TaskStartReq req) {
-        requestWorkService.requestWorkTaskStart(req);
+        Optional.ofNullable(requestWorkService.requestWorkTaskStart(req))
+                .ifPresent(ex -> GracefulResponse.raiseException(ex.getCode(), ex.getMsg()));
     }
 
     /*
@@ -50,7 +61,32 @@ public class TaskController {
      */
     @GetMapping("/api/v1/examine")
     public void ExamineRequestTask() {
-        cpHandlerService.outPutCPExamine();
+        Optional.ofNullable(requestWorkService.outPutCPExamine())
+                .ifPresent(ex -> GracefulResponse.raiseException(ex.getCode(), ex.getMsg()));
+    }
+
+    /*
+     * HandleStopCPService()
+     * 主动停止连接池服务
+     * @return
+     * @Date: 2025/1/10 14:22
+     */
+    @GetMapping("/api/v1/handle/stop")
+    public void HandleStopCPService() {
+        Optional.ofNullable(requestWorkService.handleStopCP())
+                .ifPresent(ex -> GracefulResponse.raiseException(ex.getCode(), ex.getMsg()));
+    }
+
+    /*
+     * HandleRestartCPService()
+     * 主动重启连接池服务
+     * @return
+     * @Date: 2025/1/10 14:22
+     */
+    @GetMapping("/api/v1/handle/restart")
+    public void HandleRestartCPService() {
+        Optional.ofNullable(requestWorkService.handleRestartCP())
+                .ifPresent(ex -> GracefulResponse.raiseException(ex.getCode(), ex.getMsg()));
     }
 
 }

@@ -19,6 +19,7 @@ import java.sql.SQLException;
 import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Function;
@@ -43,6 +44,11 @@ public class CPContext {
         this.dataSourceModule = dataSourceModule;
         this.uuidModule = uuidModule;
     }
+
+    // 标志位,指示当前连接池是否处于运行状态
+    public static final AtomicBoolean CP_IS_RUNNING = new AtomicBoolean(true);
+    // 用户操作关闭/重启连接池的同步锁,同时只能执行一个操作
+    public static final ReentrantLock CP_HANDLE_LOCK = new ReentrantLock();
 
     // 客户端线程等待空闲连接的信号量
     public static final Semaphore IDLE_POOL_SEMAPHORE = new Semaphore(0, true);

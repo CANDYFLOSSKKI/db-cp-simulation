@@ -19,7 +19,7 @@ public class MessagePrintUtil {
 
     public static void printException(Exception ex) {
         StringBuilder STB = new StringBuilder();
-        STB.append("[USER EXCEPTION] ").append(ex.getMessage()).append("\n").append(ExceptionUtils.getStackTrace(ex));
+        STB.append("[EXCEPTION] ").append(ex.getMessage()).append("\n").append(ExceptionUtils.getStackTrace(ex));
         LOGGER.info(STB.toString());
     }
 

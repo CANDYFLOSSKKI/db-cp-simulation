@@ -1,48 +1,63 @@
 package com.ctey.cpmodule.Service;
 
 import com.ctey.cpmodule.Context.CPContext;
+import com.ctey.cpmodule.Module.DataSourceModule;
 import com.ctey.cpmodule.Module.UUIDModule;
 import com.ctey.cpmodule.Util.MessagePrintUtil;
-import com.ctey.cpstatic.Entity.ConnectionEntity;
-import com.ctey.cpstatic.Entity.RequestEntity;
-import com.ctey.cpstatic.Entity.RequestWork;
-import com.ctey.cpstatic.Entity.TaskStartReq;
+import com.ctey.cpstatic.Entity.*;
 import com.ctey.cpstatic.Enum.ConnectionStatus;
 import com.ctey.cpstatic.Enum.RequestStatus;
+import com.ctey.cpstatic.Static.CPUserStatic;
 import com.ctey.cpstatic.Util.ModelInitUtil;
 import com.mysql.cj.protocol.Message;
+import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
+import javax.sql.DataSource;
+import java.sql.Connection;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
+import java.util.logging.Logger;
 
-import static com.ctey.cpmodule.Context.CPContext.IDLE_POOL_SEMAPHORE;
-import static com.ctey.cpstatic.Static.CPCoreStatic.MAX_WAIT_TIME;
-import static com.ctey.cpstatic.Static.CPUserStatic.CP_LACK_CONNECTION_SIGN;
-import static com.ctey.cpstatic.Static.CPUserStatic.CP_REACQUIRE_FACTOR;
+import static com.ctey.cpmodule.Context.CPContext.*;
+import static com.ctey.cpstatic.Static.CPCoreStatic.*;
+import static com.ctey.cpstatic.Static.CPUserStatic.*;
 
 @Component
 public class RequestWorkService {
+    private final ScheduledExecutorService cpExecutorExamineTask;
     private final ScheduledExecutorService cpExecutorRequestTask;
     private final CPHandlerService cpHandlerService;
     private final CPContext cpContext;
     private final UUIDModule uuidModule;
+    private final DataSourceModule dataSourceModule;
 
     // 客户端获取数据库连接操作并发锁
     private static final ReentrantLock WORK_LOCK = new ReentrantLock();
+    // 客户端所有存活线程请求的集合
+    private final BlockingQueue<ScheduledFuture<?>> requestWorkTaskCollection = new LinkedBlockingQueue<>();
+    // 定时清理线程请求集合的已被取消/已完成部分
+    private ScheduledFuture<?> processClearFinishScheduledRequestTask;
 
     @Autowired
-    public RequestWorkService(ScheduledExecutorService cpExecutorRequestTask, CPHandlerService cpHandlerService, CPContext cpContext, UUIDModule uuidModule) {
+    public RequestWorkService(ScheduledExecutorService cpExecutorExamineTask, ScheduledExecutorService cpExecutorRequestTask, CPHandlerService cpHandlerService, CPContext cpContext, UUIDModule uuidModule, DataSourceModule dataSourceModule) {
+        this.cpExecutorExamineTask = cpExecutorExamineTask;
         this.cpExecutorRequestTask = cpExecutorRequestTask;
         this.cpHandlerService = cpHandlerService;
         this.cpContext = cpContext;
         this.uuidModule = uuidModule;
+        this.dataSourceModule = dataSourceModule;
+    }
+
+    @PostConstruct
+    public void initRequestWorkSaveTask() {
+        processClearFinishScheduledRequestTask = cpExecutorRequestTask.scheduleWithFixedDelay(this::processClearFinishScheduledRequest, CP_SAVE_TASK_OFFSET, CP_SAVE_TASK_DELAY2, TimeUnit.MILLISECONDS);
     }
 
     /*
@@ -51,12 +66,20 @@ public class RequestWorkService {
      * @return
      * @Date: 2025/1/8 10:27
      */
-    public void requestWorkTaskStart(TaskStartReq req) {
+    public CPHandleException requestWorkTaskStart(TaskStartReq req) {
         try {
-            for (RequestWork work : req.getWorkList()) {
-                cpExecutorRequestTask.schedule(() -> requestWorkArrive(work), work.getArrive(), TimeUnit.MILLISECONDS);
+            if (CP_HANDLE_LOCK.isLocked()) {
+                return EXCEPTION_LOCKING;
             }
+            if (!CP_IS_RUNNING.get()) {
+                return EXCEPTION_HAS_STOP;
+            }
+            for (RequestWork work : req.getWorkList()) {
+                requestWorkTaskCollection.put(cpExecutorRequestTask.schedule(() -> requestWorkArrive(work), work.getArrive(), TimeUnit.MILLISECONDS));
+            }
+            return null;
         } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+        return EXCEPTION_ERROR;
     }
 
     /*
@@ -130,6 +153,128 @@ public class RequestWorkService {
             Thread.sleep(keep);
         } catch (Exception ex) { MessagePrintUtil.printException(ex); }
         finally { cpHandlerService.releaseConnection(connectionEntity); }
+    }
+
+
+    /*
+     * processClearFinishScheduledRequest()
+     * 定时处理已完成任务的客户端请求记录
+     * @return
+     * @Date: 2025/1/10 11:43
+     */
+    public void processClearFinishScheduledRequest() {
+        try {
+            if (!CP_IS_RUNNING.get()) { return; }
+            List<ScheduledFuture<?>> readyToRemoveList = requestWorkTaskCollection.stream().filter(scheduledFuture -> {
+                return scheduledFuture.isDone() || scheduledFuture.isCancelled();
+            }).toList();
+            requestWorkTaskCollection.removeAll(readyToRemoveList);
+        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+    }
+
+    /*
+     * handleStopCP()
+     * 用户显式关闭连接池,返回关闭操作的执行结果
+     * @return
+     * @Date: 2025/1/10 09:57
+     */
+    public CPHandleException handleStopCP() {
+        try {
+            if (CP_HANDLE_LOCK.isLocked()) {
+                return EXCEPTION_LOCKING;
+            }
+            if (!CP_IS_RUNNING.get()) {
+                return EXCEPTION_HAS_STOP;
+            }
+            CP_HANDLE_LOCK.lock();
+            Thread.sleep(CP_SAVE_TASK_DELAY2);
+            while (!CP_IS_RUNNING.compareAndSet(true, false)) {}
+            for (ScheduledFuture<?> scheduledFuture : requestWorkTaskCollection) {
+                if (!scheduledFuture.isDone() && !scheduledFuture.isCancelled()) {
+                    scheduledFuture.cancel(true);
+                }
+            }
+            IDLE_POOL_SEMAPHORE.drainPermits();
+            for (ConnectionEntity connectionEntity : cpContext.connectionEntityPoolMap.values()) {
+                connectionEntity.setStatus(ConnectionStatus.STATUS_CLOSED);
+                Optional.ofNullable(connectionEntity.getConnection()).ifPresent(connection -> {
+                    try { connection.close(); }
+                    catch (Exception ex) { MessagePrintUtil.printException(ex); }
+                });
+                Optional.ofNullable(connectionEntity.getRequest()).ifPresent(requestEntity -> {
+                    requestEntity.setStatus(RequestStatus.STATUS_ERROR);
+                });
+            }
+            return null;
+        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+        finally { CP_HANDLE_LOCK.unlock(); }
+        return EXCEPTION_ERROR;
+    }
+
+    /*
+     * handleRestartCP()
+     * 用户显式重启连接池(默认处于打开状态,因此称重启),返回重启操作的执行结果
+     * @return
+     * @Date: 2025/1/10 09:57
+     */
+    public CPHandleException handleRestartCP() {
+        try {
+            if (CP_HANDLE_LOCK.isLocked()) {
+                return EXCEPTION_LOCKING;
+            }
+            if (CP_IS_RUNNING.get()) {
+                return EXCEPTION_HAS_START;
+            }
+            CP_HANDLE_LOCK.lock();
+            CURRENT_IDLE_SIZE.set(INITIAL_POOL_SIZE);
+            CURRENT_POOL_SIZE.set(INITIAL_POOL_SIZE);
+            cpContext.connectionEntityPoolMap.clear();
+            cpContext.connectionIdleQueue.clear();
+            cpContext.requestLackConnectionQueue.clear();
+            requestWorkTaskCollection.clear();
+            for (int i = 0; i < MIN_POOL_SIZE; i++) {
+                String uuid = uuidModule.getUUIDStr();
+                Connection connection = dataSourceModule.getConnection();
+                ConnectionEntity connectionEntity = ModelInitUtil.InitConnection(uuid, connection);
+                cpContext.connectionEntityPoolMap.put(uuid, connectionEntity);
+                cpContext.connectionEntityHistoryMap.put(uuid, connectionEntity);
+                cpContext.connectionIdleQueue.add(connectionEntity);
+            }
+            while (!CP_IS_RUNNING.compareAndSet(false, true)) {}
+            Thread.sleep(CP_SAVE_TASK_DELAY2);
+            return null;
+        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+        finally { CP_HANDLE_LOCK.unlock(); }
+        return EXCEPTION_ERROR;
+    }
+
+    /*
+     * outPutCPExamine()
+     * 输出连接池当前所有存活连接/历史任务及其状态列表
+     * @return
+     * @Date: 2025/1/8 18:00
+     */
+    public CPHandleException outPutCPExamine() {
+        try {
+            if (CP_HANDLE_LOCK.isLocked()) {
+                return EXCEPTION_LOCKING;
+            }
+            if (!CP_IS_RUNNING.get()) {
+                return EXCEPTION_HAS_STOP;
+            }
+            StringBuilder stb = new StringBuilder();
+            List<ConnectionEntity> connectionEntityList = cpContext.connectionEntityPoolMap.values().stream().toList();
+            for (int i = 1; i <= connectionEntityList.size(); i++) {
+                ConnectionEntity connectionEntity = connectionEntityList.get(i-1);
+                stb.append("CONNECTION ").append(i).append("/").append(connectionEntityList.size())
+                        .append(" UUID:").append(connectionEntity.getUUID())
+                        .append(" STATUS:").append(connectionEntity.getStatus());
+                Logger.getLogger("ROOT").info(stb.toString());
+                stb.setLength(0);
+            }
+            return null;
+        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+        return EXCEPTION_ERROR;
     }
 
 }

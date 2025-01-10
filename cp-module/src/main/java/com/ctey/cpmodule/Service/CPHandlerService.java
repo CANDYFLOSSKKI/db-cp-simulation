@@ -3,6 +3,7 @@ package com.ctey.cpmodule.Service;
 import com.ctey.cpmodule.Context.CPContext;
 import com.ctey.cpmodule.Module.DataSourceModule;
 import com.ctey.cpmodule.Util.MessagePrintUtil;
+import com.ctey.cpstatic.Entity.CPHandleException;
 import com.ctey.cpstatic.Entity.ConnectionEntity;
 import com.ctey.cpstatic.Entity.RequestEntity;
 import com.ctey.cpstatic.Enum.ConnectionStatus;
@@ -21,7 +22,9 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
 import java.util.logging.Logger;
@@ -40,6 +43,13 @@ public class CPHandlerService {
     // 空闲连接队列操作并发锁
     public static final ReentrantLock IDLE_POOL_LOCK = new ReentrantLock();
 
+    // 连接池守护线程定时任务调度器
+    public ScheduledFuture<?> processLackConnectionTask;
+    public ScheduledFuture<?> processMaxWorkTimeConnectionTask;
+    public ScheduledFuture<?> processMinIdleConnectionTask;
+    public ScheduledFuture<?> processMaxIdleConnectionTask;
+
+
     @Autowired
     public CPHandlerService(ScheduledExecutorService cpExecutorExamineTask, DataSourceModule dataSourceModule, CPContext cpContext) {
         this.cpExecutorExamineTask = cpExecutorExamineTask;
@@ -49,10 +59,10 @@ public class CPHandlerService {
 
     @PostConstruct
     public void initCPHandlerSaveTask() {
-        cpExecutorExamineTask.scheduleWithFixedDelay(this::processLackConnection, 0L, CP_SAVE_TASK_DELAY, TimeUnit.MILLISECONDS);
-        cpExecutorExamineTask.scheduleWithFixedDelay(this::processMaxWorkTimeConnection, 0L, CP_SAVE_TASK_DELAY2, TimeUnit.MILLISECONDS);
-        cpExecutorExamineTask.scheduleWithFixedDelay(this::processMinIdleConnection, CP_SAVE_TASK_OFFSET2, CP_SAVE_TASK_DELAY2, TimeUnit.MILLISECONDS);
-        cpExecutorExamineTask.scheduleWithFixedDelay(this::processMaxIdleConnection, CP_SAVE_TASK_OFFSET, CP_SAVE_TASK_DELAY2, TimeUnit.MILLISECONDS);
+        processLackConnectionTask = cpExecutorExamineTask.scheduleWithFixedDelay(this::processLackConnection, 0L, CP_SAVE_TASK_DELAY, TimeUnit.MILLISECONDS);
+        processMaxWorkTimeConnectionTask = cpExecutorExamineTask.scheduleWithFixedDelay(this::processMaxWorkTimeConnection, 0L, CP_SAVE_TASK_DELAY2, TimeUnit.MILLISECONDS);
+        processMinIdleConnectionTask = cpExecutorExamineTask.scheduleWithFixedDelay(this::processMinIdleConnection, CP_SAVE_TASK_OFFSET2, CP_SAVE_TASK_DELAY2, TimeUnit.MILLISECONDS);
+        processMaxIdleConnectionTask = cpExecutorExamineTask.scheduleWithFixedDelay(this::processMaxIdleConnection, CP_SAVE_TASK_OFFSET, CP_SAVE_TASK_DELAY2, TimeUnit.MILLISECONDS);
     }
 
     /*
@@ -121,6 +131,7 @@ public class CPHandlerService {
      */
     public void processLackConnection() {
         try {
+            if (!CP_IS_RUNNING.get()) { return; }
             while (!cpContext.requestLackConnectionQueue.isEmpty()) {
                 if (cpContext.requestLackConnectionQueue.poll() == null) { break; }
                 MessagePrintUtil.printSaveTaskStart("PROCESS LACK CONNECTION");
@@ -151,6 +162,7 @@ public class CPHandlerService {
      */
     public void processMaxWorkTimeConnection() {
         try {
+            if (!CP_IS_RUNNING.get()) { return; }
             MessagePrintUtil.printSaveTaskStart("PROCESS MAX WORK TIME CONNECTION");
             Instant examineTime = Instant.now();
             List<String> maxWorkTimeUUIDList = new ArrayList<>();
@@ -186,6 +198,7 @@ public class CPHandlerService {
      */
     public void processMinIdleConnection() {
         try {
+            if (!CP_IS_RUNNING.get()) { return; }
             MessagePrintUtil.printSaveTaskStart("PROCESS MIN IDLE CONNECTION");
             int idleSize = CURRENT_IDLE_SIZE.get();
             int poolSize = CURRENT_POOL_SIZE.get();
@@ -222,45 +235,48 @@ public class CPHandlerService {
      */
     public void processMaxIdleConnection() {
         try {
+            if (!CP_IS_RUNNING.get()) { return; }
             MessagePrintUtil.printSaveTaskStart("PROCESS MAX IDLE CONNECTION");
             // 获取当前连接池中的总空闲连接数
             // 如果总空闲连接数超过了最小空闲连接数,检测出的空闲连接中超出的部分将被直接删除
             // 如果总空闲连接数未超过最小空闲连接数,检测出的所有空闲连接全部重新创建并添加进空闲连接队列
-            IDLE_POOL_LOCK.lock();
-            int expectPoolSize = CURRENT_IDLE_SIZE.get();
-            int expectToRemoveValue = MIN_IDLE_SIZE >= expectPoolSize ? 0 : expectPoolSize - MIN_IDLE_SIZE;
-            Instant examineTime = Instant.now();
-            List<ConnectionEntity> collectConnectionEntityList = cpContext.connectionIdleQueue.stream()
-                    .map(connectionEntity -> {
-                        Instant releaseTime = connectionEntity.getLastRelease() != null
-                                ? Instant.ofEpochMilli(connectionEntity.getLastRelease())
-                                : Instant.ofEpochMilli(connectionEntity.getStart());
-                        return Map.entry(releaseTime, connectionEntity);
-                    })
-                    .filter(entry -> Duration.between(entry.getKey(), examineTime).toMillis() > MAX_IDLE_TIME)
-                    .sorted(Map.Entry.comparingByKey())
-                    .map(Map.Entry::getValue)
-                    .toList();
-            // 如果没有连接处于空闲时间过长的状态,即使此时空闲连接数超过了最小空闲连接数也不会对其关闭
-            if (collectConnectionEntityList.isEmpty()) { return; }
-            cpContext.connectionIdleQueue.removeAll(collectConnectionEntityList);
-            int expectToProcessValue = collectConnectionEntityList.size();
+            try {
+                IDLE_POOL_LOCK.lock();
+                int expectPoolSize = CURRENT_IDLE_SIZE.get();
+                int expectToRemoveValue = MIN_IDLE_SIZE >= expectPoolSize ? 0 : expectPoolSize - MIN_IDLE_SIZE;
+                Instant examineTime = Instant.now();
+                List<ConnectionEntity> collectConnectionEntityList = cpContext.connectionIdleQueue.stream()
+                        .map(connectionEntity -> {
+                            Instant releaseTime = connectionEntity.getLastRelease() != null
+                                    ? Instant.ofEpochMilli(connectionEntity.getLastRelease())
+                                    : Instant.ofEpochMilli(connectionEntity.getStart());
+                            return Map.entry(releaseTime, connectionEntity);
+                        })
+                        .filter(entry -> Duration.between(entry.getKey(), examineTime).toMillis() > MAX_IDLE_TIME)
+                        .sorted(Map.Entry.comparingByKey())
+                        .map(Map.Entry::getValue)
+                        .toList();
+                // 如果没有连接处于空闲时间过长的状态,即使此时空闲连接数超过了最小空闲连接数也不会对其关闭
+                if (collectConnectionEntityList.isEmpty()) { return; }
+                cpContext.connectionIdleQueue.removeAll(collectConnectionEntityList);
+                int expectToProcessValue = collectConnectionEntityList.size();
 
-            // 如果空闲连接数在最小空闲连接数内,不会删除任何空闲连接,对所有空闲连接的状态进行重置
-            // 如果空闲连接数超过最小空闲连接数,筛选出其中空闲时间最长的一部分连接关闭,剩余的空闲连接状态重置
-            // 上述逻辑可得出"如果有足够数量的空闲时间过长的连接时,应该关闭多少个连接",实际还需要考虑空闲时间达标的连接具体有多少个
-            if (expectToRemoveValue == 0) {
-                collectConnectionEntityList.forEach(this::setConnectionRestart);
-            } else if (expectToRemoveValue < expectToProcessValue) {
-                CURRENT_IDLE_SIZE.addAndGet(-expectToRemoveValue);
-                collectConnectionEntityList.subList(0, expectToRemoveValue).forEach(this::setConnectionClose);
-                collectConnectionEntityList.subList(expectToRemoveValue, expectToProcessValue).forEach(this::setConnectionRestart);
-            } else {
-                CURRENT_IDLE_SIZE.addAndGet(-expectToProcessValue);
-                collectConnectionEntityList.forEach(this::setConnectionClose);
-            }
+                // 如果空闲连接数在最小空闲连接数内,不会删除任何空闲连接,对所有空闲连接的状态进行重置
+                // 如果空闲连接数超过最小空闲连接数,筛选出其中空闲时间最长的一部分连接关闭,剩余的空闲连接状态重置
+                // 上述逻辑可得出"如果有足够数量的空闲时间过长的连接时,应该关闭多少个连接",实际还需要考虑空闲时间达标的连接具体有多少个
+                if (expectToRemoveValue == 0) {
+                    collectConnectionEntityList.forEach(this::setConnectionRestart);
+                } else if (expectToRemoveValue < expectToProcessValue) {
+                    CURRENT_IDLE_SIZE.addAndGet(-expectToRemoveValue);
+                    collectConnectionEntityList.subList(0, expectToRemoveValue).forEach(this::setConnectionClose);
+                    collectConnectionEntityList.subList(expectToRemoveValue, expectToProcessValue).forEach(this::setConnectionRestart);
+                } else {
+                    CURRENT_IDLE_SIZE.addAndGet(-expectToProcessValue);
+                    collectConnectionEntityList.forEach(this::setConnectionClose);
+                }
+            } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+            finally { IDLE_POOL_LOCK.unlock(); }
         } catch (Exception ex) { MessagePrintUtil.printException(ex); }
-        finally { IDLE_POOL_LOCK.unlock(); }
     }
 
     /*
@@ -312,46 +328,6 @@ public class CPHandlerService {
             return statement.executeQuery("SELECT 1").next();
         } catch (Exception ex) { MessagePrintUtil.printException(ex); }
         return false;
-    }
-
-    /*
-     * outPutCPExamine()
-     * 输出连接池当前所有存活连接/历史任务及其状态列表
-     * @return
-     * @Date: 2025/1/8 18:00
-     */
-    public void outPutCPExamine() {
-        Logger LOGGER = Logger.getLogger("ROOT");
-        StringBuilder STB = new StringBuilder();
-        List<ConnectionEntity> connectionEntityList = cpContext.connectionEntityPoolMap.values().stream().toList();
-        // LOGGER.info("CURRENT_POOL_SIZE:" + CURRENT_POOL_SIZE.get());
-        // LOGGER.info("CURRENT_IDLE_SIZE:" + CURRENT_IDLE_SIZE.get());
-        for (int i = 1; i <= connectionEntityList.size(); i++) {
-            ConnectionEntity connectionEntity = connectionEntityList.get(i-1);
-            STB.append("CONNECTION ").append(i).append("/").append(connectionEntityList.size())
-                    .append(" UUID:").append(connectionEntity.getUUID())
-                    .append(" STATUS:").append(connectionEntity.getStatus());
-            LOGGER.info(STB.toString());
-            STB.setLength(0);
-        }
-        List<ConnectionEntity> idleConnectionEntityList = cpContext.connectionIdleQueue.stream().toList();
-        for (int i = 1; i <= idleConnectionEntityList.size(); i++) {
-            ConnectionEntity connectionEntity = idleConnectionEntityList.get(i-1);
-            STB.append("IDLE CONNECTION ").append(i).append("/").append(idleConnectionEntityList.size())
-                    .append(" UUID:").append(connectionEntity.getUUID())
-                    .append(" STATUS:").append(connectionEntity.getStatus());
-            LOGGER.info(STB.toString());
-            STB.setLength(0);
-        }
-//         List<RequestEntity> requestEntityList = cpContext.requestEntityHistoryMap.values().stream().toList();
-//         for (int i = 1; i <= requestEntityList.size(); i++) {
-//             RequestEntity requestEntity = requestEntityList.get(i-1);
-//             STB.append("REQUEST ").append(i).append("/").append(requestEntityList.size())
-//                     .append(" UUID:").append(requestEntity.getUUID())
-//                     .append(" STATUS:").append(requestEntity.getStatus());
-//             LOGGER.info(STB.toString());
-//             STB.setLength(0);
-//         }
     }
 
 }
