@@ -1,4 +1,4 @@
-# db-jdbc-cp
+# db-cp-simulation
  A Simple DB Connection Pooling Simulation Service/简单的数据库连接池模拟
 
 Java version: 17
