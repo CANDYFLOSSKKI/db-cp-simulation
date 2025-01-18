@@ -5,6 +5,8 @@ Java version: 17
 
 Gradle Version: 8.11.1
 
+(Do not use it in non-experimental environment/请勿将本程序使用在非实验型环境)
+
 ### 项目结构
 
 - **cp-main**: 服务入口，日志/线程池/端口相关参数配置
