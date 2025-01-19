@@ -1,25 +1,21 @@
 package com.ctey.cpmodule.Service;
 
 import com.ctey.cpmodule.Context.CPContext;
-import com.ctey.cpmodule.Module.DataSourceModule;
-import com.ctey.cpmodule.Module.UUIDModule;
-import com.ctey.cpmodule.Util.MessagePrintUtil;
+import com.ctey.cpmodule.Context.DataSourceContext;
+import com.ctey.cpmodule.Context.UUIDContext;
+import com.ctey.cpmodule.Util.MsgPrintUtil;
 import com.ctey.cpstatic.Entity.*;
-import com.ctey.cpstatic.Enum.ConnectionStatus;
-import com.ctey.cpstatic.Enum.RequestStatus;
-import com.ctey.cpstatic.Static.CPUserStatic;
-import com.ctey.cpstatic.Util.ModelInitUtil;
-import com.mysql.cj.protocol.Message;
+import com.ctey.cpstatic.Enum.ConnStatus;
+import com.ctey.cpstatic.Enum.ReqStatus;
+import com.ctey.cpstatic.Util.EntityInitUtil;
 import jakarta.annotation.PostConstruct;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import javax.sql.DataSource;
 import java.sql.Connection;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
-import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
@@ -30,13 +26,13 @@ import static com.ctey.cpstatic.Static.CPCoreStatic.*;
 import static com.ctey.cpstatic.Static.CPUserStatic.*;
 
 @Component
-public class RequestWorkService {
+public class ReqWorkService {
     private final ScheduledExecutorService cpExecutorExamineTask;
     private final ScheduledExecutorService cpExecutorRequestTask;
     private final CPHandlerService cpHandlerService;
     private final CPContext cpContext;
-    private final UUIDModule uuidModule;
-    private final DataSourceModule dataSourceModule;
+    private final UUIDContext uuidContext;
+    private final DataSourceContext dataSourceContext;
 
     // 客户端获取数据库连接操作并发锁
     private static final ReentrantLock WORK_LOCK = new ReentrantLock();
@@ -46,13 +42,13 @@ public class RequestWorkService {
     private ScheduledFuture<?> processClearFinishScheduledRequestTask;
 
     @Autowired
-    public RequestWorkService(ScheduledExecutorService cpExecutorExamineTask, ScheduledExecutorService cpExecutorRequestTask, CPHandlerService cpHandlerService, CPContext cpContext, UUIDModule uuidModule, DataSourceModule dataSourceModule) {
+    public ReqWorkService(ScheduledExecutorService cpExecutorExamineTask, ScheduledExecutorService cpExecutorRequestTask, CPHandlerService cpHandlerService, CPContext cpContext, UUIDContext uuidContext, DataSourceContext dataSourceContext) {
         this.cpExecutorExamineTask = cpExecutorExamineTask;
         this.cpExecutorRequestTask = cpExecutorRequestTask;
         this.cpHandlerService = cpHandlerService;
         this.cpContext = cpContext;
-        this.uuidModule = uuidModule;
-        this.dataSourceModule = dataSourceModule;
+        this.uuidContext = uuidContext;
+        this.dataSourceContext = dataSourceContext;
     }
 
     @PostConstruct
@@ -74,11 +70,11 @@ public class RequestWorkService {
             if (!CP_IS_RUNNING.get()) {
                 return EXCEPTION_HAS_STOP;
             }
-            for (RequestWork work : req.getWorkList()) {
+            for (ReqWork work : req.getWorkList()) {
                 requestWorkTaskCollection.put(cpExecutorRequestTask.schedule(() -> requestWorkArrive(work), work.getArrive(), TimeUnit.MILLISECONDS));
             }
             return null;
-        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+        } catch (Exception ex) { MsgPrintUtil.printException(ex); }
         return EXCEPTION_ERROR;
     }
 
@@ -88,33 +84,33 @@ public class RequestWorkService {
      * @return
      * @Date: 2025/1/7 20:40
      */
-    public void requestWorkArrive(RequestWork work) {
+    public void requestWorkArrive(ReqWork work) {
         try {
             Instant signWaitTime = null;
-            ConnectionEntity connectionEntity = null;
-            String uuid = uuidModule.getUUIDStr();
-            RequestEntity requestEntity = ModelInitUtil.InitRequest(uuid, work);
-            cpContext.requestEntityHistoryMap.put(uuid, requestEntity);
-            MessagePrintUtil.printRequestArrive(requestEntity);
+            ConnEntity connEntity = null;
+            String uuid = uuidContext.getUUIDStr();
+            ReqEntity reqEntity = EntityInitUtil.InitRequest(uuid, work);
+            cpContext.requestEntityHistoryMap.put(uuid, reqEntity);
+            MsgPrintUtil.printRequestArrive(reqEntity);
 
-            while(connectionEntity == null) {
+            while(connEntity == null) {
                 try {
                     // 双重检查锁获取连接,不同并发任务应当同时只有一个与连接池交互
                     WORK_LOCK.lock();
                     if (!cpContext.connectionIdleQueue.isEmpty()) {
-                        connectionEntity = cpHandlerService.acquireConnection();
+                        connEntity = cpHandlerService.acquireConnection();
                     }
-                } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+                } catch (Exception ex) { MsgPrintUtil.printException(ex); }
                 finally { WORK_LOCK.unlock(); }
                 // 调用内部获取连接的方法仍然有可能连接为空,此时进入基于信号量的阻塞态
-                if (connectionEntity == null) {
+                if (connEntity == null) {
                     if (signWaitTime == null) {
                         // 首次未获取到连接时,记录开始阻塞的时间点,向连接池发送新增空闲连接的请求
                         cpContext.requestLackConnectionQueue.put(CP_LACK_CONNECTION_SIGN);
-                        MessagePrintUtil.printRequestWait(requestEntity);
+                        MsgPrintUtil.printRequestWait(reqEntity);
                         signWaitTime = Instant.now();
                     }
-                    requestEntity.setStatus(RequestStatus.STATUS_WAITING);
+                    reqEntity.setStatus(ReqStatus.STATUS_WAITING);
                     // 记录当前已阻塞的时间,与最大等待时间相减得到本次阻塞态的剩余时间
                     long leftWaitTime = MAX_WAIT_TIME - (long)(Duration.between(signWaitTime, Instant.now()).toMillis() * CP_REACQUIRE_FACTOR);
                     if (!IDLE_POOL_SEMAPHORE.tryAcquire(leftWaitTime, TimeUnit.MILLISECONDS)) { break; }
@@ -122,23 +118,23 @@ public class RequestWorkService {
             }
 
             // 如果到达最大等待时间仍未获取到连接,放弃连接请求并输出错误信息
-            if (connectionEntity == null) {
-                requestEntity.setStatus(RequestStatus.STATUS_ERROR);
-                MessagePrintUtil.printRequestTimeout(requestEntity);
+            if (connEntity == null) {
+                reqEntity.setStatus(ReqStatus.STATUS_ERROR);
+                MsgPrintUtil.printRequestTimeout(reqEntity);
                 return;
             }
 
             // 如果获取到空闲连接,设置工作进程的相关参数后执行任务
             Instant startWorkTime = Instant.now();
-            connectionEntity.setStatus(ConnectionStatus.STATUS_WORKING);
-            connectionEntity.setLastWork(startWorkTime.toEpochMilli());
-            connectionEntity.setCount(connectionEntity.getCount() + 1);
-            requestEntity.setStatus(RequestStatus.STATUS_WORKING);
-            requestEntity.setAcquire(startWorkTime.toEpochMilli());
-            connectionEntity.setRequest(requestEntity);
-            MessagePrintUtil.printRequestAcquire(connectionEntity);
-            requestWorkProcess(connectionEntity, work.getKeep());
-        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+            connEntity.setStatus(ConnStatus.STATUS_WORKING);
+            connEntity.setLastWork(startWorkTime.toEpochMilli());
+            connEntity.setCount(connEntity.getCount() + 1);
+            reqEntity.setStatus(ReqStatus.STATUS_WORKING);
+            reqEntity.setAcquire(startWorkTime.toEpochMilli());
+            connEntity.setRequest(reqEntity);
+            MsgPrintUtil.printRequestAcquire(connEntity);
+            requestWorkProcess(connEntity, work.getKeep());
+        } catch (Exception ex) { MsgPrintUtil.printException(ex); }
     }
 
     /*
@@ -147,12 +143,12 @@ public class RequestWorkService {
      * @return
      * @Date: 2025/1/7 21:03
      */
-    public void requestWorkProcess(ConnectionEntity connectionEntity, Long keep) {
+    public void requestWorkProcess(ConnEntity connEntity, Long keep) {
         try {
             // 模拟连续持有连接的时间段,时延结束后将连接返回给连接池通知归还连接
             Thread.sleep(keep);
-        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
-        finally { cpHandlerService.releaseConnection(connectionEntity); }
+        } catch (Exception ex) { MsgPrintUtil.printException(ex); }
+        finally { cpHandlerService.releaseConnection(connEntity); }
     }
 
 
@@ -169,7 +165,7 @@ public class RequestWorkService {
                 return scheduledFuture.isDone() || scheduledFuture.isCancelled();
             }).toList();
             requestWorkTaskCollection.removeAll(readyToRemoveList);
-        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+        } catch (Exception ex) { MsgPrintUtil.printException(ex); }
     }
 
     /*
@@ -195,18 +191,18 @@ public class RequestWorkService {
                 }
             }
             IDLE_POOL_SEMAPHORE.drainPermits();
-            for (ConnectionEntity connectionEntity : cpContext.connectionEntityPoolMap.values()) {
-                connectionEntity.setStatus(ConnectionStatus.STATUS_CLOSED);
-                Optional.ofNullable(connectionEntity.getConnection()).ifPresent(connection -> {
+            for (ConnEntity connEntity : cpContext.connectionEntityPoolMap.values()) {
+                connEntity.setStatus(ConnStatus.STATUS_CLOSED);
+                Optional.ofNullable(connEntity.getConnection()).ifPresent(connection -> {
                     try { connection.close(); }
-                    catch (Exception ex) { MessagePrintUtil.printException(ex); }
+                    catch (Exception ex) { MsgPrintUtil.printException(ex); }
                 });
-                Optional.ofNullable(connectionEntity.getRequest()).ifPresent(requestEntity -> {
-                    requestEntity.setStatus(RequestStatus.STATUS_ERROR);
+                Optional.ofNullable(connEntity.getRequest()).ifPresent(requestEntity -> {
+                    requestEntity.setStatus(ReqStatus.STATUS_ERROR);
                 });
             }
             return null;
-        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+        } catch (Exception ex) { MsgPrintUtil.printException(ex); }
         finally { CP_HANDLE_LOCK.unlock(); }
         return EXCEPTION_ERROR;
     }
@@ -233,17 +229,17 @@ public class RequestWorkService {
             cpContext.requestLackConnectionQueue.clear();
             requestWorkTaskCollection.clear();
             for (int i = 0; i < MIN_POOL_SIZE; i++) {
-                String uuid = uuidModule.getUUIDStr();
-                Connection connection = dataSourceModule.getConnection();
-                ConnectionEntity connectionEntity = ModelInitUtil.InitConnection(uuid, connection);
-                cpContext.connectionEntityPoolMap.put(uuid, connectionEntity);
-                cpContext.connectionEntityHistoryMap.put(uuid, connectionEntity);
-                cpContext.connectionIdleQueue.add(connectionEntity);
+                String uuid = uuidContext.getUUIDStr();
+                Connection connection = dataSourceContext.getConnection();
+                ConnEntity connEntity = EntityInitUtil.InitConnection(uuid, connection);
+                cpContext.connectionEntityPoolMap.put(uuid, connEntity);
+                cpContext.connectionEntityHistoryMap.put(uuid, connEntity);
+                cpContext.connectionIdleQueue.add(connEntity);
             }
             while (!CP_IS_RUNNING.compareAndSet(false, true)) {}
             Thread.sleep(CP_SAVE_TASK_DELAY2);
             return null;
-        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+        } catch (Exception ex) { MsgPrintUtil.printException(ex); }
         finally { CP_HANDLE_LOCK.unlock(); }
         return EXCEPTION_ERROR;
     }
@@ -263,17 +259,17 @@ public class RequestWorkService {
                 return EXCEPTION_HAS_STOP;
             }
             StringBuilder stb = new StringBuilder();
-            List<ConnectionEntity> connectionEntityList = cpContext.connectionEntityPoolMap.values().stream().toList();
-            for (int i = 1; i <= connectionEntityList.size(); i++) {
-                ConnectionEntity connectionEntity = connectionEntityList.get(i-1);
-                stb.append("CONNECTION ").append(i).append("/").append(connectionEntityList.size())
-                        .append(" UUID:").append(connectionEntity.getUUID())
-                        .append(" STATUS:").append(connectionEntity.getStatus());
+            List<ConnEntity> connEntityList = cpContext.connectionEntityPoolMap.values().stream().toList();
+            for (int i = 1; i <= connEntityList.size(); i++) {
+                ConnEntity connEntity = connEntityList.get(i-1);
+                stb.append("CONNECTION ").append(i).append("/").append(connEntityList.size())
+                        .append(" UUID:").append(connEntity.getUUID())
+                        .append(" STATUS:").append(connEntity.getStatus());
                 Logger.getLogger("ROOT").info(stb.toString());
                 stb.setLength(0);
             }
             return null;
-        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+        } catch (Exception ex) { MsgPrintUtil.printException(ex); }
         return EXCEPTION_ERROR;
     }
 

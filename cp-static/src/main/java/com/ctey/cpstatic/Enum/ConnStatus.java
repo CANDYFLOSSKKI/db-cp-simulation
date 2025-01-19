@@ -1,7 +1,7 @@
 package com.ctey.cpstatic.Enum;
 
 // 连接状态
-public enum ConnectionStatus {
+public enum ConnStatus {
     STATUS_IDLE,
     STATUS_WORKING,
     STATUS_RESTARTING,

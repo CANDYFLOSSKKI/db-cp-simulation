@@ -10,7 +10,7 @@ import java.io.Serializable;
 @Data
 @AllArgsConstructor
 @NoArgsConstructor
-public class RequestWork implements Serializable {
+public class ReqWork implements Serializable {
     private Integer id;
     private Long arrive;
     private Long keep;

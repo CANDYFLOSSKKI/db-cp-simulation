@@ -1,34 +1,26 @@
 package com.ctey.cpmodule.Service;
 
 import com.ctey.cpmodule.Context.CPContext;
-import com.ctey.cpmodule.Module.DataSourceModule;
-import com.ctey.cpmodule.Util.MessagePrintUtil;
-import com.ctey.cpstatic.Entity.CPHandleException;
-import com.ctey.cpstatic.Entity.ConnectionEntity;
-import com.ctey.cpstatic.Entity.RequestEntity;
-import com.ctey.cpstatic.Enum.ConnectionStatus;
-import com.ctey.cpstatic.Enum.RequestStatus;
-import com.mysql.cj.protocol.Message;
+import com.ctey.cpmodule.Context.DataSourceContext;
+import com.ctey.cpmodule.Util.MsgPrintUtil;
+import com.ctey.cpstatic.Entity.ConnEntity;
+import com.ctey.cpstatic.Entity.ReqEntity;
+import com.ctey.cpstatic.Enum.ConnStatus;
+import com.ctey.cpstatic.Enum.ReqStatus;
 import jakarta.annotation.PostConstruct;
-import org.dromara.dynamictp.core.executor.ScheduledDtpExecutor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import java.sql.Connection;
 import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CancellationException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.logging.Logger;
-import java.util.stream.Collectors;
 
 import static com.ctey.cpmodule.Context.CPContext.*;
 import static com.ctey.cpstatic.Static.CPCoreStatic.*;
@@ -37,7 +29,7 @@ import static com.ctey.cpstatic.Static.CPUserStatic.*;
 @Component
 public class CPHandlerService {
     private final ScheduledExecutorService cpExecutorExamineTask;
-    private final DataSourceModule dataSourceModule;
+    private final DataSourceContext dataSourceContext;
     private final CPContext cpContext;
 
     // 空闲连接队列操作并发锁
@@ -51,9 +43,9 @@ public class CPHandlerService {
 
 
     @Autowired
-    public CPHandlerService(ScheduledExecutorService cpExecutorExamineTask, DataSourceModule dataSourceModule, CPContext cpContext) {
+    public CPHandlerService(ScheduledExecutorService cpExecutorExamineTask, DataSourceContext dataSourceContext, CPContext cpContext) {
         this.cpExecutorExamineTask = cpExecutorExamineTask;
-        this.dataSourceModule = dataSourceModule;
+        this.dataSourceContext = dataSourceContext;
         this.cpContext = cpContext;
     }
 
@@ -71,17 +63,17 @@ public class CPHandlerService {
      * @return
      * @Date: 2025/1/6 22:07
      */
-    public ConnectionEntity acquireConnection() {
+    public ConnEntity acquireConnection() {
         try {
             IDLE_POOL_LOCK.lock();
-            ConnectionEntity connectionEntity = cpContext.connectionIdleQueue.poll();
+            ConnEntity connEntity = cpContext.connectionIdleQueue.poll();
             // 获取空闲连接队列锁的操作和外部操作并非原子,仍然可能出现获取不到空闲连接的情况
             // 如果仍然获取不到空闲连接,返回NULL给外部客户端线程,通知其返回队列继续等待
-            if (connectionEntity != null) {
-                MessagePrintUtil.printAcquireConnection(CURRENT_IDLE_SIZE.decrementAndGet(), connectionEntity);
+            if (connEntity != null) {
+                MsgPrintUtil.printAcquireConnection(CURRENT_IDLE_SIZE.decrementAndGet(), connEntity);
             }
-            return connectionEntity;
-        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+            return connEntity;
+        } catch (Exception ex) { MsgPrintUtil.printException(ex); }
         finally { IDLE_POOL_LOCK.unlock(); }
         return null;
     }
@@ -92,35 +84,35 @@ public class CPHandlerService {
      * @return
      * @Date: 2025/1/7 19:59
      */
-    public void releaseConnection(ConnectionEntity connectionEntity) {
+    public void releaseConnection(ConnEntity connEntity) {
         try {
             Instant releaseTime = Instant.now();
             // 设置本次连接工作结束的相关参数
-            connectionEntity.setLastRelease(releaseTime.toEpochMilli());
-            RequestEntity requestEntity = connectionEntity.getRequest();
-            requestEntity.setStatus(RequestStatus.STATUS_RELEASED);
-            requestEntity.setRelease(releaseTime.toEpochMilli());
-            MessagePrintUtil.printRequestRelease(connectionEntity);
+            connEntity.setLastRelease(releaseTime.toEpochMilli());
+            ReqEntity reqEntity = connEntity.getRequest();
+            reqEntity.setStatus(ReqStatus.STATUS_RELEASED);
+            reqEntity.setRelease(releaseTime.toEpochMilli());
+            MsgPrintUtil.printRequestRelease(connEntity);
 
             // 如果连接使用次数超出限制,关闭该连接(连接使用次数在连接被获取时自增)
             // 如果执行连接健康度检查(SELECT 1测试查询)失败,同样会关闭该连接
-            if (connectionEntity.getCount() >= MAX_USE_COUNT || !checkConnectionHealth(connectionEntity)) {
-                setConnectionClose(connectionEntity);
+            if (connEntity.getCount() >= MAX_USE_COUNT || !checkConnectionHealth(connEntity)) {
+                setConnectionClose(connEntity);
             // 如果连接使用次数未超限制,将连接重新添加进空闲连接队列,释放信号量通知阻塞的客户端线程(如果有)获取
             } else {
-                connectionEntity.setRequest(null);
-                connectionEntity.setStatus(ConnectionStatus.STATUS_IDLE);
+                connEntity.setRequest(null);
+                connEntity.setStatus(ConnStatus.STATUS_IDLE);
                 try {
                     IDLE_POOL_LOCK.lock();
-                    cpContext.connectionIdleQueue.put(connectionEntity);
-                    MessagePrintUtil.printRestoreConnection(CURRENT_IDLE_SIZE.incrementAndGet(), connectionEntity);
-                } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+                    cpContext.connectionIdleQueue.put(connEntity);
+                    MsgPrintUtil.printRestoreConnection(CURRENT_IDLE_SIZE.incrementAndGet(), connEntity);
+                } catch (Exception ex) { MsgPrintUtil.printException(ex); }
                 finally { IDLE_POOL_LOCK.unlock(); }
                 if (!cpContext.requestLackConnectionQueue.isEmpty()) {
                     IDLE_POOL_SEMAPHORE.release();
                 }
             }
-        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+        } catch (Exception ex) { MsgPrintUtil.printException(ex); }
     }
 
     /*
@@ -134,24 +126,24 @@ public class CPHandlerService {
             if (!CP_IS_RUNNING.get()) { return; }
             while (!cpContext.requestLackConnectionQueue.isEmpty()) {
                 if (cpContext.requestLackConnectionQueue.poll() == null) { break; }
-                MessagePrintUtil.printSaveTaskStart("PROCESS LACK CONNECTION");
+                MsgPrintUtil.printSaveTaskStart("PROCESS LACK CONNECTION");
                 // 当前连接数未超过最大连接数时才允许新建连接
                 if (CURRENT_POOL_SIZE.get() < MAX_POOL_SIZE) {
-                    ConnectionEntity connectionEntity = cpContext.createConnection();
-                    cpContext.connectionEntityHistoryMap.put(connectionEntity.getUUID(), connectionEntity);
+                    ConnEntity connEntity = cpContext.createConnection();
+                    cpContext.connectionEntityHistoryMap.put(connEntity.getUUID(), connEntity);
                     CURRENT_POOL_SIZE.incrementAndGet();
                     // 将新建的空闲连接添加进空闲连接队列,释放信号量通知阻塞的客户端线程获取
                     try {
                         IDLE_POOL_LOCK.lock();
-                        cpContext.connectionEntityPoolMap.put(connectionEntity.getUUID(), connectionEntity);
-                        cpContext.connectionIdleQueue.put(connectionEntity);
-                        MessagePrintUtil.printNewConnection(CURRENT_IDLE_SIZE.incrementAndGet(), connectionEntity);
-                    } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+                        cpContext.connectionEntityPoolMap.put(connEntity.getUUID(), connEntity);
+                        cpContext.connectionIdleQueue.put(connEntity);
+                        MsgPrintUtil.printNewConnection(CURRENT_IDLE_SIZE.incrementAndGet(), connEntity);
+                    } catch (Exception ex) { MsgPrintUtil.printException(ex); }
                     finally { IDLE_POOL_LOCK.unlock(); }
                     IDLE_POOL_SEMAPHORE.release();
                 }
             }
-        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+        } catch (Exception ex) { MsgPrintUtil.printException(ex); }
     }
 
     /*
@@ -163,12 +155,12 @@ public class CPHandlerService {
     public void processMaxWorkTimeConnection() {
         try {
             if (!CP_IS_RUNNING.get()) { return; }
-            MessagePrintUtil.printSaveTaskStart("PROCESS MAX WORK TIME CONNECTION");
+            MsgPrintUtil.printSaveTaskStart("PROCESS MAX WORK TIME CONNECTION");
             Instant examineTime = Instant.now();
             List<String> maxWorkTimeUUIDList = new ArrayList<>();
             // 记录开始工作时间和当前时间戳时间段过长的所有连接ID
             cpContext.connectionEntityPoolMap.values().stream().filter(connectionEntity -> {
-                if (connectionEntity.getStatus() != ConnectionStatus.STATUS_WORKING) { return false; }
+                if (connectionEntity.getStatus() != ConnStatus.STATUS_WORKING) { return false; }
                 Duration workTime = Duration.between(Instant.ofEpochMilli(connectionEntity.getLastWork()), examineTime);
                 return workTime.compareTo(Duration.ofMillis(MAX_CONNECT_TIME)) >= 0;
             }).forEach(connectionEntity -> {
@@ -176,18 +168,18 @@ public class CPHandlerService {
                 try {
                     // 关闭所有筛选出的目标连接,相应的客户端线程置为错误状态
                     connectionEntity.getConnection().close();
-                    MessagePrintUtil.printCloseConnection(connectionEntity);
-                    MessagePrintUtil.printRequestDisrupt(connectionEntity);
-                    connectionEntity.setStatus(ConnectionStatus.STATUS_CLOSED);
+                    MsgPrintUtil.printCloseConnection(connectionEntity);
+                    MsgPrintUtil.printRequestDisrupt(connectionEntity);
+                    connectionEntity.setStatus(ConnStatus.STATUS_CLOSED);
                     connectionEntity.setLastRelease(examineTime.toEpochMilli());
-                    RequestEntity requestEntity = connectionEntity.getRequest();
-                    requestEntity.setStatus(RequestStatus.STATUS_ERROR);
-                    requestEntity.setRelease(examineTime.toEpochMilli());
-                } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+                    ReqEntity reqEntity = connectionEntity.getRequest();
+                    reqEntity.setStatus(ReqStatus.STATUS_ERROR);
+                    reqEntity.setRelease(examineTime.toEpochMilli());
+                } catch (Exception ex) { MsgPrintUtil.printException(ex); }
             });
             maxWorkTimeUUIDList.forEach(cpContext.connectionEntityPoolMap::remove);
             CURRENT_POOL_SIZE.addAndGet(-maxWorkTimeUUIDList.size());
-        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+        } catch (Exception ex) { MsgPrintUtil.printException(ex); }
     }
 
     /*
@@ -199,32 +191,32 @@ public class CPHandlerService {
     public void processMinIdleConnection() {
         try {
             if (!CP_IS_RUNNING.get()) { return; }
-            MessagePrintUtil.printSaveTaskStart("PROCESS MIN IDLE CONNECTION");
+            MsgPrintUtil.printSaveTaskStart("PROCESS MIN IDLE CONNECTION");
             int idleSize = CURRENT_IDLE_SIZE.get();
             int poolSize = CURRENT_POOL_SIZE.get();
             if (idleSize >= MIN_IDLE_SIZE || poolSize >= MAX_POOL_SIZE) { return; }
             // 未到达最大连接数时,按缺少的空闲连接数补齐空闲连接
             // 已到达最大连接数时,最多补齐空闲连接到总连接数=最大连接数
             int expectToAddValue = Math.min(MIN_IDLE_SIZE - idleSize, MAX_POOL_SIZE - poolSize);
-            List<ConnectionEntity> connectionEntityList = new ArrayList<>();
+            List<ConnEntity> connEntityList = new ArrayList<>();
             for (int i = 0; i < expectToAddValue; i++) {
-                ConnectionEntity connectionEntity = cpContext.createConnection();
-                cpContext.connectionEntityHistoryMap.put(connectionEntity.getUUID(), connectionEntity);
-                connectionEntityList.add(connectionEntity);
+                ConnEntity connEntity = cpContext.createConnection();
+                cpContext.connectionEntityHistoryMap.put(connEntity.getUUID(), connEntity);
+                connEntityList.add(connEntity);
             }
             CURRENT_POOL_SIZE.addAndGet(expectToAddValue);
             // 先创建目标个数的连接,再对空闲连接队列上锁,因此整体并非原子操作,可能导致添加后的连接数>最大连接数
             // 由于有空闲时间过长的回收机制,该情况可用于应对客户端线程流量高峰的处理,并发量不足时会自动回收
             try {
                 IDLE_POOL_LOCK.lock();
-                for (ConnectionEntity connectionEntity : connectionEntityList) {
-                    cpContext.connectionEntityPoolMap.put(connectionEntity.getUUID(), connectionEntity);
-                    cpContext.connectionIdleQueue.put(connectionEntity);
-                    MessagePrintUtil.printNewConnection(CURRENT_IDLE_SIZE.incrementAndGet(), connectionEntity);
+                for (ConnEntity connEntity : connEntityList) {
+                    cpContext.connectionEntityPoolMap.put(connEntity.getUUID(), connEntity);
+                    cpContext.connectionIdleQueue.put(connEntity);
+                    MsgPrintUtil.printNewConnection(CURRENT_IDLE_SIZE.incrementAndGet(), connEntity);
                 }
-            } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+            } catch (Exception ex) { MsgPrintUtil.printException(ex); }
             finally { IDLE_POOL_LOCK.unlock(); }
-        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+        } catch (Exception ex) { MsgPrintUtil.printException(ex); }
     }
 
     /*
@@ -236,7 +228,7 @@ public class CPHandlerService {
     public void processMaxIdleConnection() {
         try {
             if (!CP_IS_RUNNING.get()) { return; }
-            MessagePrintUtil.printSaveTaskStart("PROCESS MAX IDLE CONNECTION");
+            MsgPrintUtil.printSaveTaskStart("PROCESS MAX IDLE CONNECTION");
             // 获取当前连接池中的总空闲连接数
             // 如果总空闲连接数超过了最小空闲连接数,检测出的空闲连接中超出的部分将被直接删除
             // 如果总空闲连接数未超过最小空闲连接数,检测出的所有空闲连接全部重新创建并添加进空闲连接队列
@@ -245,7 +237,7 @@ public class CPHandlerService {
                 int expectPoolSize = CURRENT_IDLE_SIZE.get();
                 int expectToRemoveValue = MIN_IDLE_SIZE >= expectPoolSize ? 0 : expectPoolSize - MIN_IDLE_SIZE;
                 Instant examineTime = Instant.now();
-                List<ConnectionEntity> collectConnectionEntityList = cpContext.connectionIdleQueue.stream()
+                List<ConnEntity> collectConnEntityList = cpContext.connectionIdleQueue.stream()
                         .map(connectionEntity -> {
                             Instant releaseTime = connectionEntity.getLastRelease() != null
                                     ? Instant.ofEpochMilli(connectionEntity.getLastRelease())
@@ -257,26 +249,26 @@ public class CPHandlerService {
                         .map(Map.Entry::getValue)
                         .toList();
                 // 如果没有连接处于空闲时间过长的状态,即使此时空闲连接数超过了最小空闲连接数也不会对其关闭
-                if (collectConnectionEntityList.isEmpty()) { return; }
-                cpContext.connectionIdleQueue.removeAll(collectConnectionEntityList);
-                int expectToProcessValue = collectConnectionEntityList.size();
+                if (collectConnEntityList.isEmpty()) { return; }
+                cpContext.connectionIdleQueue.removeAll(collectConnEntityList);
+                int expectToProcessValue = collectConnEntityList.size();
 
                 // 如果空闲连接数在最小空闲连接数内,不会删除任何空闲连接,对所有空闲连接的状态进行重置
                 // 如果空闲连接数超过最小空闲连接数,筛选出其中空闲时间最长的一部分连接关闭,剩余的空闲连接状态重置
                 // 上述逻辑可得出"如果有足够数量的空闲时间过长的连接时,应该关闭多少个连接",实际还需要考虑空闲时间达标的连接具体有多少个
                 if (expectToRemoveValue == 0) {
-                    collectConnectionEntityList.forEach(this::setConnectionRestart);
+                    collectConnEntityList.forEach(this::setConnectionRestart);
                 } else if (expectToRemoveValue < expectToProcessValue) {
                     CURRENT_IDLE_SIZE.addAndGet(-expectToRemoveValue);
-                    collectConnectionEntityList.subList(0, expectToRemoveValue).forEach(this::setConnectionClose);
-                    collectConnectionEntityList.subList(expectToRemoveValue, expectToProcessValue).forEach(this::setConnectionRestart);
+                    collectConnEntityList.subList(0, expectToRemoveValue).forEach(this::setConnectionClose);
+                    collectConnEntityList.subList(expectToRemoveValue, expectToProcessValue).forEach(this::setConnectionRestart);
                 } else {
                     CURRENT_IDLE_SIZE.addAndGet(-expectToProcessValue);
-                    collectConnectionEntityList.forEach(this::setConnectionClose);
+                    collectConnEntityList.forEach(this::setConnectionClose);
                 }
-            } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+            } catch (Exception ex) { MsgPrintUtil.printException(ex); }
             finally { IDLE_POOL_LOCK.unlock(); }
-        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+        } catch (Exception ex) { MsgPrintUtil.printException(ex); }
     }
 
     /*
@@ -285,15 +277,15 @@ public class CPHandlerService {
      * @return
      * @Date: 2025/1/8 14:36
      */
-    public void setConnectionClose(ConnectionEntity connectionEntity) {
+    public void setConnectionClose(ConnEntity connEntity) {
         try {
-            connectionEntity.setStatus(ConnectionStatus.STATUS_CLOSED);
-            cpContext.connectionEntityPoolMap.remove(connectionEntity.getUUID());
+            connEntity.setStatus(ConnStatus.STATUS_CLOSED);
+            cpContext.connectionEntityPoolMap.remove(connEntity.getUUID());
             CURRENT_POOL_SIZE.decrementAndGet();
-            connectionEntity.getConnection().close();
-            connectionEntity.setConnection(null);
-            MessagePrintUtil.printCloseConnection(connectionEntity);
-        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+            connEntity.getConnection().close();
+            connEntity.setConnection(null);
+            MsgPrintUtil.printCloseConnection(connEntity);
+        } catch (Exception ex) { MsgPrintUtil.printException(ex); }
     }
 
     /*
@@ -302,19 +294,19 @@ public class CPHandlerService {
      * @return
      * @Date: 2025/1/8 14:36
      */
-    public void setConnectionRestart(ConnectionEntity connectionEntity) {
+    public void setConnectionRestart(ConnEntity connEntity) {
         try {
-            connectionEntity.setStatus(ConnectionStatus.STATUS_RESTARTING);
-            connectionEntity.getConnection().close();
-            connectionEntity.setConnection(dataSourceModule.getConnection());
-            connectionEntity.setStart(System.currentTimeMillis());
-            connectionEntity.setCount(0);
-            connectionEntity.setLastWork(null);
-            connectionEntity.setLastRelease(null);
-            connectionEntity.setStatus(ConnectionStatus.STATUS_IDLE);
-            cpContext.connectionIdleQueue.put(connectionEntity);
-            MessagePrintUtil.printRestartConnection(connectionEntity);
-        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+            connEntity.setStatus(ConnStatus.STATUS_RESTARTING);
+            connEntity.getConnection().close();
+            connEntity.setConnection(dataSourceContext.getConnection());
+            connEntity.setStart(System.currentTimeMillis());
+            connEntity.setCount(0);
+            connEntity.setLastWork(null);
+            connEntity.setLastRelease(null);
+            connEntity.setStatus(ConnStatus.STATUS_IDLE);
+            cpContext.connectionIdleQueue.put(connEntity);
+            MsgPrintUtil.printRestartConnection(connEntity);
+        } catch (Exception ex) { MsgPrintUtil.printException(ex); }
     }
 
     /*
@@ -323,10 +315,10 @@ public class CPHandlerService {
      * @return
      * @Date: 2025/1/8 20:59
      */
-    public boolean checkConnectionHealth(ConnectionEntity connectionEntity) {
-        try (Statement statement = connectionEntity.getConnection().createStatement()) {
+    public boolean checkConnectionHealth(ConnEntity connEntity) {
+        try (Statement statement = connEntity.getConnection().createStatement()) {
             return statement.executeQuery("SELECT 1").next();
-        } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+        } catch (Exception ex) { MsgPrintUtil.printException(ex); }
         return false;
     }
 

@@ -9,13 +9,13 @@ import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import org.springframework.transaction.annotation.EnableTransactionManagement;
 
-@SpringBootApplication
 @EnableDynamicTp
 @EnableGracefulResponse
 @EnableAsync
 @EnableScheduling
 @EnableTransactionManagement
-@ComponentScan(basePackages = {
+@SpringBootApplication(scanBasePackages = {
+        "com.ctey.cpmain",
         "com.ctey.cpmodule",
         "com.ctey.cpstatic",
         "com.ctey.cpweb"

@@ -1,48 +1,34 @@
 package com.ctey.cpmodule.Context;
 
-import com.ctey.cpmodule.Module.DataSourceModule;
-import com.ctey.cpmodule.Module.UUIDModule;
-import com.ctey.cpmodule.Util.MessagePrintUtil;
-import com.ctey.cpstatic.Entity.ConnectionEntity;
-import com.ctey.cpstatic.Entity.RequestEntity;
-import com.ctey.cpstatic.Entity.RequestWork;
-import com.ctey.cpstatic.Enum.ConnectionStatus;
-import com.ctey.cpstatic.Enum.RequestStatus;
-import com.ctey.cpstatic.Util.ModelInitUtil;
+import com.ctey.cpmodule.Util.MsgPrintUtil;
+import com.ctey.cpstatic.Entity.ConnEntity;
+import com.ctey.cpstatic.Entity.ReqEntity;
+import com.ctey.cpstatic.Util.EntityInitUtil;
 import jakarta.annotation.PostConstruct;
-import lombok.Getter;
-import org.dromara.dynamictp.core.executor.OrderedDtpExecutor;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import java.sql.Connection;
-import java.sql.SQLException;
-import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.function.Function;
 
-import static com.ctey.cpstatic.Enum.ConnectionStatus.STATUS_IDLE;
-import static com.ctey.cpstatic.Enum.RequestStatus.STATUS_WAITING;
-import static com.ctey.cpstatic.Enum.RequestStatus.STATUS_WORKING;
 import static com.ctey.cpstatic.Static.CPCoreStatic.*;
 import static com.ctey.cpstatic.Static.CPUserStatic.CP_INIT_SCHEDULE;
-import static com.ctey.cpstatic.Static.CPUserStatic.CP_WAIT_SIZE;
 
 // 数据库连接池动态参数和信息存储上下文
 @Component
 public class CPContext {
     private final ScheduledExecutorService cpExecutorExamineTask;
-    private final DataSourceModule dataSourceModule;
-    private final UUIDModule uuidModule;
+    private final DataSourceContext dataSourceContext;
+    private final UUIDContext uuidContext;
 
     @Autowired
-    public CPContext(ScheduledExecutorService cpExecutorExamineTask, DataSourceModule dataSourceModule, UUIDModule uuidModule) {
+    public CPContext(ScheduledExecutorService cpExecutorExamineTask, DataSourceContext dataSourceContext, UUIDContext uuidContext) {
         this.cpExecutorExamineTask = cpExecutorExamineTask;
-        this.dataSourceModule = dataSourceModule;
-        this.uuidModule = uuidModule;
+        this.dataSourceContext = dataSourceContext;
+        this.uuidContext = uuidContext;
     }
 
     // 标志位,指示当前连接池是否处于运行状态
@@ -58,17 +44,17 @@ public class CPContext {
     public static final AtomicInteger CURRENT_IDLE_SIZE = new AtomicInteger(0);
 
     // 连接池当前的存活连接记录
-    public final ConcurrentHashMap<String, ConnectionEntity> connectionEntityPoolMap = new ConcurrentHashMap<>();
+    public final ConcurrentHashMap<String, ConnEntity> connectionEntityPoolMap = new ConcurrentHashMap<>();
     // 连接池历史创建的连接记录
-    public final ConcurrentHashMap<String, ConnectionEntity> connectionEntityHistoryMap = new ConcurrentHashMap<>();
+    public final ConcurrentHashMap<String, ConnEntity> connectionEntityHistoryMap = new ConcurrentHashMap<>();
     // 客户端线程的历史任务记录
-    public final ConcurrentHashMap<String, RequestEntity> requestEntityHistoryMap = new ConcurrentHashMap<>();
+    public final ConcurrentHashMap<String, ReqEntity> requestEntityHistoryMap = new ConcurrentHashMap<>();
     // 客户端线程等待空闲连接的发送信号队列
     public final BlockingQueue<Integer> requestLackConnectionQueue = new LinkedBlockingQueue<>();
     // 连接池的空闲连接优先级队列(按连接的创建时间排序连接获取的优先级)
-    public final BlockingQueue<ConnectionEntity> connectionIdleQueue = new PriorityBlockingQueue<>(MIN_IDLE_SIZE, new Comparator<ConnectionEntity>() {
+    public final BlockingQueue<ConnEntity> connectionIdleQueue = new PriorityBlockingQueue<>(MIN_IDLE_SIZE, new Comparator<ConnEntity>() {
         @Override
-        public int compare(ConnectionEntity o1, ConnectionEntity o2) {
+        public int compare(ConnEntity o1, ConnEntity o2) {
             // negative integer -> the first argument is less
             // positive integer -> the first argument is greater
             // Function<ConnectionStatus, Integer> statusToInt = (status) -> {
@@ -94,14 +80,14 @@ public class CPContext {
                 while (!CURRENT_IDLE_SIZE.compareAndSet(0, INITIAL_POOL_SIZE)) {}
                 while (!CURRENT_POOL_SIZE.compareAndSet(0, INITIAL_POOL_SIZE)) {}
                 for (int i = 0; i < MIN_POOL_SIZE; i++) {
-                    String uuid = uuidModule.getUUIDStr();
-                    Connection connection = dataSourceModule.getConnection();
-                    ConnectionEntity connectionEntity = ModelInitUtil.InitConnection(uuid, connection);
-                    connectionEntityPoolMap.put(uuid, connectionEntity);
-                    connectionEntityHistoryMap.put(uuid, connectionEntity);
-                    connectionIdleQueue.add(connectionEntity);
+                    String uuid = uuidContext.getUUIDStr();
+                    Connection connection = dataSourceContext.getConnection();
+                    ConnEntity connEntity = EntityInitUtil.InitConnection(uuid, connection);
+                    connectionEntityPoolMap.put(uuid, connEntity);
+                    connectionEntityHistoryMap.put(uuid, connEntity);
+                    connectionIdleQueue.add(connEntity);
                 }
-            } catch (Exception ex) { MessagePrintUtil.printException(ex); }
+            } catch (Exception ex) { MsgPrintUtil.printException(ex); }
         }, CP_INIT_SCHEDULE, TimeUnit.SECONDS);
     }
 
@@ -111,10 +97,10 @@ public class CPContext {
      * @return
      * @Date: 2025/1/7 21:32
      */
-    public ConnectionEntity createConnection() throws Exception{
-        String uuid = uuidModule.getUUIDStr();
-        Connection connection = dataSourceModule.getConnection();
-        return ModelInitUtil.InitConnection(uuid, connection);
+    public ConnEntity createConnection() throws Exception{
+        String uuid = uuidContext.getUUIDStr();
+        Connection connection = dataSourceContext.getConnection();
+        return EntityInitUtil.InitConnection(uuid, connection);
     }
 
 }

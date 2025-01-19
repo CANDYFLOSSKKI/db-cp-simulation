@@ -13,5 +13,5 @@ import java.util.List;
 @NoArgsConstructor
 public class TaskStartReq implements Serializable {
     private Integer count;
-    private List<RequestWork> workList;
+    private List<ReqWork> workList;
 }

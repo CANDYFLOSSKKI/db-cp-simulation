@@ -1,8 +1,6 @@
 package com.ctey.cpweb.Controller;
 
-import com.ctey.cpmodule.Service.CPHandlerService;
-import com.ctey.cpmodule.Service.RequestWorkService;
-import com.ctey.cpstatic.Entity.CPHandleException;
+import com.ctey.cpmodule.Service.ReqWorkService;
 import com.ctey.cpstatic.Entity.TaskStartReq;
 import com.feiniaojin.gracefulresponse.GracefulResponse;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -13,13 +11,13 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.util.Optional;
 
-@RestController
-public class TaskController {
-    private final RequestWorkService requestWorkService;
+@RestController("/api/v1")
+public class CPTaskController {
+    private final ReqWorkService reqWorkService;
 
     @Autowired
-    public TaskController(RequestWorkService requestWorkService) {
-        this.requestWorkService = requestWorkService;
+    public CPTaskController(ReqWorkService reqWorkService) {
+        this.reqWorkService = reqWorkService;
     }
 
     /*
@@ -47,9 +45,9 @@ public class TaskController {
      * @return
      * @Date: 2025/1/8 21:28
      */
-    @PostMapping("/api/v1/start")
-    public void StartRequestTask(@RequestBody TaskStartReq req) {
-        Optional.ofNullable(requestWorkService.requestWorkTaskStart(req))
+    @PostMapping("/start")
+    public void startRequestTask(@RequestBody TaskStartReq req) {
+        Optional.ofNullable(reqWorkService.requestWorkTaskStart(req))
                 .ifPresent(ex -> GracefulResponse.raiseException(ex.getCode(), ex.getMsg()));
     }
 
@@ -59,9 +57,9 @@ public class TaskController {
      * @return
      * @Date: 2025/1/8 21:28
      */
-    @GetMapping("/api/v1/examine")
-    public void ExamineRequestTask() {
-        Optional.ofNullable(requestWorkService.outPutCPExamine())
+    @GetMapping("/examine")
+    public void examineRequestTask() {
+        Optional.ofNullable(reqWorkService.outPutCPExamine())
                 .ifPresent(ex -> GracefulResponse.raiseException(ex.getCode(), ex.getMsg()));
     }
 
@@ -71,9 +69,9 @@ public class TaskController {
      * @return
      * @Date: 2025/1/10 14:22
      */
-    @GetMapping("/api/v1/handle/stop")
-    public void HandleStopCPService() {
-        Optional.ofNullable(requestWorkService.handleStopCP())
+    @GetMapping("/handle/stop")
+    public void handleStopCPService() {
+        Optional.ofNullable(reqWorkService.handleStopCP())
                 .ifPresent(ex -> GracefulResponse.raiseException(ex.getCode(), ex.getMsg()));
     }
 
@@ -83,9 +81,9 @@ public class TaskController {
      * @return
      * @Date: 2025/1/10 14:22
      */
-    @GetMapping("/api/v1/handle/restart")
-    public void HandleRestartCPService() {
-        Optional.ofNullable(requestWorkService.handleRestartCP())
+    @GetMapping("/handle/restart")
+    public void handleRestartCPService() {
+        Optional.ofNullable(reqWorkService.handleRestartCP())
                 .ifPresent(ex -> GracefulResponse.raiseException(ex.getCode(), ex.getMsg()));
     }
 

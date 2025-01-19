@@ -1,16 +1,15 @@
 package com.ctey.cpstatic.Util;
 
-import com.ctey.cpstatic.Entity.ConnectionEntity;
-import com.ctey.cpstatic.Entity.RequestEntity;
-import com.ctey.cpstatic.Entity.RequestWork;
-import com.ctey.cpstatic.Enum.RequestStatus;
+import com.ctey.cpstatic.Entity.ConnEntity;
+import com.ctey.cpstatic.Entity.ReqEntity;
+import com.ctey.cpstatic.Entity.ReqWork;
 
 import java.sql.Connection;
 
-import static com.ctey.cpstatic.Enum.ConnectionStatus.STATUS_IDLE;
-import static com.ctey.cpstatic.Enum.RequestStatus.STATUS_ARRIVED;
+import static com.ctey.cpstatic.Enum.ConnStatus.STATUS_IDLE;
+import static com.ctey.cpstatic.Enum.ReqStatus.STATUS_ARRIVED;
 
-public class ModelInitUtil {
+public class EntityInitUtil {
 
     /*
      * InitConnection()
@@ -18,8 +17,8 @@ public class ModelInitUtil {
      * @return
      * @Date: 2025/1/8 21:23
      */
-    public static ConnectionEntity InitConnection(String UUID, Connection connection) {
-        return new ConnectionEntity(
+    public static ConnEntity InitConnection(String UUID, Connection connection) {
+        return new ConnEntity(
                 UUID,
                 connection,
                 System.currentTimeMillis(),
@@ -37,8 +36,8 @@ public class ModelInitUtil {
      * @return
      * @Date: 2025/1/8 21:24
      */
-    public static RequestEntity InitRequest(String UUID, RequestWork request) {
-        return new RequestEntity(
+    public static ReqEntity InitRequest(String UUID, ReqWork request) {
+        return new ReqEntity(
                 UUID,
                 System.currentTimeMillis(),
                 null,
