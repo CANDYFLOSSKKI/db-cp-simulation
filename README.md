@@ -1,5 +1,5 @@
 # db-cp-simulation
- A Simple DB Connection Pooling Simulation Service/简单的数据库连接池模拟
+Simple DB Connection Pooling Simulation Service/简单的数据库连接池模拟
 
 (Do not use it in non-experimental environment/请勿将本程序使用在非实验型环境)
 
